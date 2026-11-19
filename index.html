@@ -93,6 +93,29 @@
             
             <!-- Left Column: Form Configuration (5 cols on lg) -->
             <div class="lg:col-span-5 space-y-6">
+
+                <!-- Card 0: Pengaturan API Key (Untuk Deployment GitHub Pages / Hosting Mandiri) -->
+                <div class="bg-white rounded-2xl shadow-sm border border-amber-200 p-5 bg-gradient-to-br from-amber-50/60 to-white">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <div class="p-1.5 bg-amber-100 text-amber-700 rounded-lg">
+                                <i data-lucide="key-round" class="w-4 h-4"></i>
+                            </div>
+                            <h2 class="text-sm font-bold text-slate-800">Konfigurasi Gemini API Key</h2>
+                        </div>
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline flex items-center gap-1">
+                            <span>Dapatkan Key Gratis</span>
+                            <i data-lucide="external-link" class="w-3 h-3"></i>
+                        </a>
+                    </div>
+                    <p class="text-xs text-slate-600 mb-3">Wajib diisi saat aplikasi di-hosting di <b>GitHub Pages</b> atau server mandiri agar fitur AI dapat berjalan.</p>
+                    <div class="relative flex items-center">
+                        <input type="password" id="geminiApiKey" placeholder="Tempel API Key Gemini Anda (AIzaSy...)" class="w-full pl-3.5 pr-10 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition">
+                        <button type="button" onclick="toggleApiKeyVisibility()" class="absolute right-2.5 text-slate-400 hover:text-slate-600" title="Tampilkan/Sembunyikan API Key">
+                            <i data-lucide="eye" id="eyeIcon" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
                 
                 <!-- Card 1: Identitas & Kurikulum -->
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
@@ -578,7 +601,21 @@
             setTimeout(() => {
                 toast.classList.add('opacity-0', '-translate-y-2');
                 setTimeout(() => toast.remove(), 300);
-            }, 4000);
+            }, 5000);
+        }
+
+        // Toggle API Key Visibility
+        function toggleApiKeyVisibility() {
+            const input = document.getElementById('geminiApiKey');
+            const icon = document.getElementById('eyeIcon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.setAttribute('data-lucide', 'eye-off');
+            } else {
+                input.type = 'password';
+                icon.setAttribute('data-lucide', 'eye');
+            }
+            lucide.createIcons();
         }
 
         // Loading State Helper
@@ -606,7 +643,15 @@
 
         // Gemini API Call with Exponential Backoff
         async function callGeminiAPI(payload) {
-            const apiKey = ""; // Runtime environment provides the key automatically
+            const userApiKey = document.getElementById('geminiApiKey').value.trim();
+            const apiKey = userApiKey || ""; // Menggunakan input user jika di-deploy di GitHub, atau fallback otomatis di lingkungan preview
+            
+            // Deteksi jika berjalan di GitHub Pages / domain publik tanpa API Key
+            const isExternalHost = !window.location.hostname.includes('googleusercontent') && !window.location.hostname.includes('localhost') && window.location.protocol !== 'file:';
+            if (isExternalHost && !apiKey) {
+                throw new Error("API Key Gemini belum diisi. Silakan masukkan API Key Anda pada kotak 'Konfigurasi Gemini API Key' di sebelah kiri.");
+            }
+
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
             
             const maxRetries = 5;
@@ -621,7 +666,19 @@
                     });
 
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        let errorDetail = `HTTP ${response.status}`;
+                        try {
+                            const errJson = await response.json();
+                            if (errJson.error && errJson.error.message) {
+                                errorDetail = errJson.error.message;
+                            }
+                        } catch (_) {}
+
+                        // Jangan retry jika error autentikasi/API Key tidak valid (400 / 403)
+                        if (response.status === 400 || response.status === 403) {
+                            throw new Error(`API Key tidak valid atau ditolak (${errorDetail}). Periksa kembali Gemini API Key Anda.`);
+                        }
+                        throw new Error(`Gagal menghubungi server AI (${errorDetail})`);
                     }
 
                     const result = await response.json();
@@ -631,7 +688,7 @@
                     }
                     return text;
                 } catch (error) {
-                    if (attempt === maxRetries) {
+                    if (attempt === maxRetries || error.message.includes('API Key')) {
                         throw error;
                     }
                     await new Promise(resolve => setTimeout(resolve, delays[attempt]));
@@ -645,12 +702,18 @@
             if (!config) return;
 
             switchTab('kisi');
-            setLoading(true, 'Menyusun Kisi-Kisi Soal...', 'Memetakan Tujuan Pembelajaran ke indikator soal sesuai level Taksonomi SOLO.');
+            setLoading(true, 'Menyusun Kisi-Kisi Soal...', 'Memetakan Capaian Pembelajaran dan Tujuan Pembelajaran ke dalam indikator berbasis Taksonomi SOLO.');
 
-            const systemPrompt = `Anda adalah pakar evaluasi pendidikan dan asesmen Kurikulum Merdeka Indonesia yang sangat menguasai Taksonomi SOLO (Structure of the Observed Learning Outcome: Pre-struktural, Uni-struktural, Multi-struktural, Relational, dan Extended Abstract).
-Tugas Anda adalah membuat Kisi-Kisi Penulisan Soal yang akurat, terukur, dan menggunakan Kata Kerja Operasional (KKO) yang tepat sesuai level Taksonomi SOLO yang diminta untuk setiap nomor soal.`;
+            const systemPrompt = `Anda adalah pakar asesmen pendidikan Kurikulum Merdeka Indonesia dan ahli Taksonomi SOLO (Structure of the Observed Learning Outcome). 
+Buatlah kisi-kisi soal yang sangat akurat, pedagogis, dan terukur sesuai daftar distribusi soal yang diminta.
+Pastikan setiap indikator soal mencerminkan kata kerja operasional dan karakteristik level SOLO yang diminta:
+- Pre-Struktural (LOTS): Mengenali informasi dasar/eksplisit awal secara sederhana.
+- Uni-Struktural (LOTS): Mengidentifikasi, menyebutkan, atau menggunakan satu konsep/aspek relevan.
+- Multi-Struktural (MOTS): Menjelaskan, menguraikan, atau mengklasifikasikan beberapa aspek/konsep secara terpisah.
+- Relational (HOTS): Menganalisis hubungan, membandingkan, menghubungkan sebab-akibat, atau mengintegrasikan beberapa konsep menjadi satu kesatuan utuh.
+- Extended Abstract (HOTS): Mengevaluasi, memprediksi, merumuskan hipotesis, atau menggeneralisasi prinsip ke dalam situasi/konteks baru yang belum pernah diajarkan langsung.`;
 
-            const userPrompt = `Buatkan kisi-kisi soal berdasarkan data berikut:
+            const userPrompt = `Buatkan Kisi-Kisi Soal untuk data berikut:
 - Satuan Pendidikan: ${config.satuanPendidikan}
 - Jenjang: ${config.jenjang}
 - Fase/Kelas: ${config.faseKelas}
@@ -659,15 +722,10 @@ Tugas Anda adalah membuat Kisi-Kisi Penulisan Soal yang akurat, terukur, dan men
 - Capaian Pembelajaran (CP): ${config.capaianPembelajaran}
 - Tujuan Pembelajaran (TP): ${config.tujuanPembelajaran}
 
-Rincian Daftar Soal yang Wajib Dibuatkan Kisi-Kisinya (Total ${config.distribusiSoal.length} soal):
+Daftar spesifikasi tiap nomor soal yang WAJIB dibuat berurutan:
 ${JSON.stringify(config.distribusiSoal, null, 2)}
 
-Pastikan setiap nomor soal memiliki:
-1. Tujuan Pembelajaran (TP) yang spesifik/relevan.
-2. Materi / Sub-materi pokok.
-3. Indikator Soal yang jelas (memuat ABCD: Audience, Behavior sesuai level SOLO, Condition, Degree).
-4. Level Taksonomi SOLO dan Kategori Kesulitan (LOTS/MOTS/HOTS) yang persis sama dengan daftar di atas.
-5. Bentuk Soal dan Nomor Soal yang persis sama dengan daftar di atas.`;
+Kembalikan HANYA array JSON valid sesuai skema.`;
 
             const payload = {
                 contents: [{ parts: [{ text: userPrompt }] }],
@@ -683,11 +741,11 @@ Pastikan setiap nomor soal memiliki:
                                 tujuanPembelajaran: { type: "STRING" },
                                 materi: { type: "STRING" },
                                 indikatorSoal: { type: "STRING" },
-                                levelSolo: { type: "STRING" },
-                                kategoriKesulitan: { type: "STRING" },
-                                bentukSoal: { type: "STRING" }
+                                bentukSoal: { type: "STRING" },
+                                levelKesulitan: { type: "STRING" },
+                                levelSolo: { type: "STRING" }
                             },
-                            required: ["nomorSoal", "tujuanPembelajaran", "materi", "indikatorSoal", "levelSolo", "kategoriKesulitan", "bentukSoal"]
+                            required: ["nomorSoal", "tujuanPembelajaran", "materi", "indikatorSoal", "bentukSoal", "levelKesulitan", "levelSolo"]
                         }
                     }
                 }
@@ -700,13 +758,13 @@ Pastikan setiap nomor soal memiliki:
                 renderKisiKisiDocument(generatedKisiData);
                 showToast('Kisi-kisi soal berhasil dibuat!', 'success');
             } catch (err) {
-                showToast('Gagal membuat kisi-kisi soal. Silakan coba lagi.', 'error');
+                showToast(err.message || 'Gagal membuat kisi-kisi soal. Silakan coba lagi.', 'error');
             } finally {
                 setLoading(false);
             }
         }
 
-        // Render Kisi-Kisi HTML Table
+        // Render Kisi-Kisi HTML Document
         function renderKisiKisiDocument(data) {
             const { config, items } = data;
             const outputEl = document.getElementById('outputKisi');
@@ -720,43 +778,48 @@ Pastikan setiap nomor soal memiliki:
                         <td>${item.tujuanPembelajaran}</td>
                         <td>${item.materi}</td>
                         <td>${item.indikatorSoal}</td>
-                        <td style="text-align: center;">
-                            <strong>${item.levelSolo}</strong><br>
-                            <span style="font-size: 9pt;">(${item.kategoriKesulitan})</span>
-                        </td>
                         <td style="text-align: center;">${item.bentukSoal}</td>
+                        <td style="text-align: center;">${item.levelKesulitan}</td>
+                        <td style="text-align: center; font-weight: bold;">${item.levelSolo}</td>
                     </tr>
                 `;
             });
 
-            const html = `
+            const today = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
+            outputEl.innerHTML = `
                 <div id="printableKisi">
-                    <div style="text-align: center; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 10px;">
-                        <h2 style="margin: 0; font-size: 14pt; font-weight: bold; text-transform: uppercase;">KISI-KISI PENULISAN SOAL ASESMEN</h2>
-                        <h3 style="margin: 4px 0 0 0; font-size: 12pt; font-weight: bold; text-transform: uppercase;">${config.satuanPendidikan}</h3>
+                    <div style="text-align: center; margin-bottom: 16px;">
+                        <h2 style="font-size: 14pt; font-weight: bold; margin: 0; text-transform: uppercase;">KISI-KISI PENULISAN SOAL ASESMEN SUMATIF</h2>
+                        <h3 style="font-size: 12pt; font-weight: bold; margin: 4px 0 0 0; text-transform: uppercase;">${config.satuanPendidikan}</h3>
                     </div>
 
-                    <table style="border: none; margin-bottom: 14px;">
+                    <table style="border: none; margin-bottom: 12px; width: 100%;">
                         <tr style="border: none;">
-                            <td style="border: none; padding: 2px 4px; width: 22%;"><strong>Mata Pelajaran</strong></td>
+                            <td style="border: none; padding: 2px 4px; width: 22%;"><b>Mata Pelajaran</b></td>
                             <td style="border: none; padding: 2px 4px; width: 2%;">:</td>
-                            <td style="border: none; padding: 2px 4px; width: 46%;">${config.mataPelajaran}</td>
-                            <td style="border: none; padding: 2px 4px; width: 15%;"><strong>Jenjang</strong></td>
+                            <td style="border: none; padding: 2px 4px; width: 41%;">${config.mataPelajaran}</td>
+                            <td style="border: none; padding: 2px 4px; width: 18%;"><b>Jenjang</b></td>
                             <td style="border: none; padding: 2px 4px; width: 2%;">:</td>
-                            <td style="border: none; padding: 2px 4px; width: 13%;">${config.jenjang}</td>
+                            <td style="border: none; padding: 2px 4px; width: 15%;">${config.jenjang}</td>
                         </tr>
                         <tr style="border: none;">
-                            <td style="border: none; padding: 2px 4px;"><strong>Topik / Materi</strong></td>
-                            <td style="border: none; padding: 2px 4px;">:</td>
-                            <td style="border: none; padding: 2px 4px;">${config.topikMateri}</td>
-                            <td style="border: none; padding: 2px 4px;"><strong>Fase / Kelas</strong></td>
+                            <td style="border: none; padding: 2px 4px;"><b>Fase / Kelas</b></td>
                             <td style="border: none; padding: 2px 4px;">:</td>
                             <td style="border: none; padding: 2px 4px;">${config.faseKelas}</td>
+                            <td style="border: none; padding: 2px 4px;"><b>Jumlah Soal</b></td>
+                            <td style="border: none; padding: 2px 4px;">:</td>
+                            <td style="border: none; padding: 2px 4px;">${items.length} Butir</td>
                         </tr>
                         <tr style="border: none;">
-                            <td style="border: none; padding: 2px 4px; vertical-align: top;"><strong>Capaian Pembelajaran</strong></td>
+                            <td style="border: none; padding: 2px 4px;"><b>Topik / Materi</b></td>
+                            <td style="border: none; padding: 2px 4px;">:</td>
+                            <td colspan="4" style="border: none; padding: 2px 4px;">${config.topikMateri}</td>
+                        </tr>
+                        <tr style="border: none;">
+                            <td style="border: none; padding: 2px 4px; vertical-align: top;"><b>Capaian Pembelajaran</b></td>
                             <td style="border: none; padding: 2px 4px; vertical-align: top;">:</td>
-                            <td colspan="4" style="border: none; padding: 2px 4px;">${config.capaianPembelajaran}</td>
+                            <td colspan="4" style="border: none; padding: 2px 4px; text-align: justify;">${config.capaianPembelajaran}</td>
                         </tr>
                     </table>
 
@@ -765,10 +828,11 @@ Pastikan setiap nomor soal memiliki:
                             <tr>
                                 <th style="width: 5%;">No</th>
                                 <th style="width: 22%;">Tujuan Pembelajaran</th>
-                                <th style="width: 16%;">Materi</th>
-                                <th style="width: 32%;">Indikator Soal</th>
-                                <th style="width: 14%;">Level SOLO & Kesulitan</th>
-                                <th style="width: 11%;">Bentuk Soal</th>
+                                <th style="width: 15%;">Materi</th>
+                                <th style="width: 28%;">Indikator Soal</th>
+                                <th style="width: 10%;">Bentuk Soal</th>
+                                <th style="width: 8%;">Level</th>
+                                <th style="width: 12%;">Taksonomi SOLO</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -776,27 +840,22 @@ Pastikan setiap nomor soal memiliki:
                         </tbody>
                     </table>
 
-                    <div style="margin-top: 24px; display: flex; justify-content: space-between; font-size: 11pt;">
-                        <div style="width: 45%;">
-                            <p style="margin: 0;">Mengetahui,</p>
-                            <p style="margin: 0;">Kepala ${config.satuanPendidikan}</p>
-                            <br><br><br>
-                            <p style="margin: 0;">(....................................................)</p>
-                            <p style="margin: 0;">NIP.</p>
-                        </div>
-                        <div style="width: 45%;">
-                            <p style="margin: 0;">..........................., .................... 2026</p>
-                            <p style="margin: 0;">Guru Mata Pelajaran</p>
-                            <br><br><br>
-                            <p style="margin: 0;">(....................................................)</p>
-                            <p style="margin: 0;">NIP.</p>
-                        </div>
-                    </div>
+                    <table style="border: none; margin-top: 24px; width: 100%;">
+                        <tr style="border: none;">
+                            <td style="border: none; width: 60%;"></td>
+                            <td style="border: none; width: 40%; text-align: left;">
+                                <div>....................., ${today}</div>
+                                <div>Guru Mata Pelajaran,</div>
+                                <br><br><br>
+                                <div><b><u>......................................................</u></b></div>
+                                <div>NIP. ..........................................</div>
+                            </td>
+                        </tr>
+                    </table>
                 </div>
             `;
 
             emptyEl.classList.add('hidden');
-            outputEl.innerHTML = html;
             outputEl.classList.remove('hidden');
         }
 
@@ -806,36 +865,31 @@ Pastikan setiap nomor soal memiliki:
             if (!config) return;
 
             switchTab('soal');
-            setLoading(true, 'Menyusun Naskah Soal & Kunci Jawaban...', 'Membuat stimulus kontekstual, butir soal bermutu, kunci jawaban, dan pedoman penskoran.');
+            setLoading(true, 'Menyusun Naskah Soal & Kunci Jawaban...', 'Membuat stimulus kontekstual, butir soal sesuai level Taksonomi SOLO, kunci jawaban, dan pedoman penskoran.');
 
-            // Jika kisi-kisi sudah ada untuk konfigurasi yang sama, gunakan indikator dari kisi-kisi agar sinkron 100%
-            let referensiKisiPrompt = '';
-            if (generatedKisiData && generatedKisiData.config.topikMateri === config.topikMateri && generatedKisiData.items.length === config.distribusiSoal.length) {
-                referensiKisiPrompt = `\nGunakan indikator soal dari Kisi-Kisi yang sudah disusun berikut agar 100% selaras:\n${JSON.stringify(generatedKisiData.items, null, 2)}`;
-            }
+            const referensiKisi = generatedKisiData && generatedKisiData.config.topikMateri === config.topikMateri
+                ? `Gunakan acuan indikator dari kisi-kisi berikut agar selaras 100%:\n${JSON.stringify(generatedKisiData.items, null, 2)}`
+                : `Buat butir soal berdasarkan daftar spesifikasi berikut:\n${JSON.stringify(config.distribusiSoal, null, 2)}`;
 
-            const systemPrompt = `Anda adalah penulis soal profesional untuk asesmen Kurikulum Merdeka Indonesia yang menguasai Taksonomi SOLO (Pre-struktural, Uni-struktural, Multi-struktural, Relational, Extended Abstract).
-Aturan penyusunan soal:
-- Gunakan bahasa Indonesia yang baku, komunikatif, dan sesuai tingkat perkembangan peserta didik pada Fase/Kelas yang dituju.
-- Untuk soal level Relational dan Extended Abstract (HOTS), sertakan stimulus singkat (wacana, kasus, data, atau fenomena kontekstual) sebelum pertanyaan.
-- Pilihan Ganda (PG): Sediakan opsi A, B, C, D (atau A, B, C, D, E khusus jenjang SMA) dengan satu jawaban paling tepat.
-- Pilihan Ganda Kompleks: Sediakan 4-5 pernyataan/opsi di mana peserta didik memilih lebih dari satu jawaban benar (atau Benar/Salah). Jelaskan instruksinya secara eksplisit.
-- Isian Singkat: Pertanyaan yang menuntut jawaban singkat, padat, dan pasti.
-- Uraian / Esai: Pertanyaan terbuka yang menuntut analisis/sintesis/evaluasi sesuai level SOLO-nya, dilengkapi rubrik/pedoman penskoran.
-- Sajikan hasil dalam format JSON terstruktur.`;
+            const systemPrompt = `Anda adalah penulis soal profesional Kurikulum Merdeka Indonesia yang menguasai penyusunan soal berbasis Taksonomi SOLO (Pre-Struktural, Uni-Struktural, Multi-Struktural, Relational, Extended Abstract).
+Aturan pembuatan butir soal:
+1. Sesuaikan kompleksitas bahasa dan stimulus dengan Jenjang (${config.jenjang}) dan ${config.faseKelas}.
+2. Untuk bentuk "Pilihan Ganda (PG)": sediakan tepat 4 opsi (A, B, C, D) untuk SD/SMP atau 5 opsi (A, B, C, D, E) untuk SMA dalam array 'pilihan'. Hanya 1 jawaban benar.
+3. Untuk bentuk "Pilihan Ganda Kompleks": sediakan 4 atau 5 pernyataan/opsi dalam array 'pilihan' di mana peserta didik memilih lebih dari satu jawaban benar (misal: "A dan C", atau "Pernyataan 1 dan 3 benar"). Jelaskan instruksi singkat di akhir pertanyaan jika perlu.
+4. Untuk bentuk "Isian Singkat" dan "Uraian / Esai": kosongkan array 'pilihan' ([]).
+5. Sertakan kunci jawaban yang jelas, pembahasan singkat yang mencerminkan alasan kognitif level SOLO-nya, serta skor maksimal untuk setiap butir soal.`;
 
-            const userPrompt = `Buatkan Naskah Soal lengkap beserta Kunci Jawaban & Pembahasan berdasarkan identitas berikut:
+            const userPrompt = `Buatkan Naskah Soal Lengkap beserta Kunci Jawaban dan Pedoman Penskoran untuk:
 - Satuan Pendidikan: ${config.satuanPendidikan}
-- Jenjang: ${config.jenjang}
-- Fase/Kelas: ${config.faseKelas}
+- Jenjang: ${config.jenjang} (${config.faseKelas})
 - Mata Pelajaran: ${config.mataPelajaran}
 - Topik/Materi: ${config.topikMateri}
 - Capaian Pembelajaran: ${config.capaianPembelajaran}
 - Tujuan Pembelajaran: ${config.tujuanPembelajaran}
 
-Daftar Rincian Soal yang Harus Dibuat (${config.distribusiSoal.length} soal):
-${JSON.stringify(config.distribusiSoal, null, 2)}
-${referensiKisiPrompt}`;
+${referensiKisi}
+
+Kembalikan HANYA array JSON valid sesuai skema.`;
 
             const payload = {
                 contents: [{ parts: [{ text: userPrompt }] }],
@@ -847,21 +901,21 @@ ${referensiKisiPrompt}`;
                         items: {
                             type: "OBJECT",
                             properties: {
-                                nomor: { type: "INTEGER" },
+                                nomorSoal: { type: "INTEGER" },
                                 bentukSoal: { type: "STRING" },
+                                levelKesulitan: { type: "STRING" },
                                 levelSolo: { type: "STRING" },
-                                kategoriKesulitan: { type: "STRING" },
-                                stimulus: { type: "STRING", description: "Teks bacaan/kasus/data pengantar soal jika diperlukan, kosongkan string jika tidak perlu" },
+                                stimulus: { type: "STRING" },
                                 pertanyaan: { type: "STRING" },
-                                pilihanJawaban: {
+                                pilihan: {
                                     type: "ARRAY",
-                                    items: { type: "STRING" },
-                                    description: "Daftar opsi jawaban (misal: ['A. ...', 'B. ...']) untuk PG dan PG Kompleks. Kosongkan array jika Isian atau Uraian."
+                                    items: { type: "STRING" }
                                 },
                                 kunciJawaban: { type: "STRING" },
-                                pembahasanDanSkor: { type: "STRING", description: "Penjelasan alasan jawaban benar dan bobot/rubrik penskoran" }
+                                pembahasan: { type: "STRING" },
+                                skorMaksimal: { type: "INTEGER" }
                             },
-                            required: ["nomor", "bentukSoal", "levelSolo", "kategoriKesulitan", "stimulus", "pertanyaan", "pilihanJawaban", "kunciJawaban", "pembahasanDanSkor"]
+                            required: ["nomorSoal", "bentukSoal", "levelKesulitan", "levelSolo", "pertanyaan", "pilihan", "kunciJawaban", "pembahasan", "skorMaksimal"]
                         }
                     }
                 }
@@ -873,153 +927,175 @@ ${referensiKisiPrompt}`;
                 renderNaskahSoalDocument(config, soalItems);
                 showToast('Naskah soal & kunci jawaban berhasil dibuat!', 'success');
             } catch (err) {
-                showToast('Gagal membuat naskah soal. Silakan coba lagi.', 'error');
+                showToast(err.message || 'Gagal membuat naskah soal. Silakan coba lagi.', 'error');
             } finally {
                 setLoading(false);
             }
         }
 
         // Render Naskah Soal HTML Document
-        function renderNaskahSoalDocument(config, soalItems) {
+        function renderNaskahSoalDocument(config, items) {
             const outputEl = document.getElementById('outputSoal');
             const emptyEl = document.getElementById('emptySoal');
 
-            // Kelompokkan soal berdasarkan Bentuk Soal agar rapi seperti naskah ujian resmi
-            const grouped = {};
-            soalItems.forEach(item => {
-                if (!grouped[item.bentukSoal]) {
-                    grouped[item.bentukSoal] = [];
+            // Kelompokkan soal berdasarkan bentuk soal
+            const groups = {};
+            items.forEach(item => {
+                if (!groups[item.bentukSoal]) {
+                    groups[item.bentukSoal] = [];
                 }
-                grouped[item.bentukSoal].push(item);
+                groups[item.bentukSoal].push(item);
             });
 
             const romawi = ['I', 'II', 'III', 'IV', 'V'];
-            let sectionIdx = 0;
-            let soalSectionsHtml = '';
+            let soalSectionHtml = '';
+            let groupIdx = 0;
 
-            for (const [bentuk, items] of Object.entries(grouped)) {
+            for (const [bentuk, list] of Object.entries(groups)) {
                 let petunjuk = 'Jawablah pertanyaan-pertanyaan berikut dengan tepat!';
-                if (bentuk.toLowerCase().includes('kompleks')) {
-                    petunjuk = 'Pilihlah lebih dari satu jawaban yang benar pada setiap soal berikut!';
-                } else if (bentuk.toLowerCase().includes('pilihan ganda')) {
-                    petunjuk = 'Pilihlah satu jawaban yang paling tepat (A, B, C, atau D/E)!';
-                } else if (bentuk.toLowerCase().includes('isian')) {
-                    petunjuk = 'Isilah titik-titik pada soal berikut dengan jawaban yang singkat dan tepat!';
-                } else if (bentuk.toLowerCase().includes('uraian')) {
-                    petunjuk = 'Uraikan jawaban Anda secara jelas, logis, dan sistematis!';
+                if (bentuk.includes('Pilihan Ganda (PG)')) {
+                    petunjuk = 'Pilihlah salah satu jawaban yang paling tepat dengan memberi tanda silang (X) pada huruf A, B, C, D, atau E!';
+                } else if (bentuk.includes('Kompleks')) {
+                    petunjuk = 'Pilihlah lebih dari satu jawaban yang benar sesuai dengan pernyataan atau pertanyaan berikut!';
+                } else if (bentuk.includes('Isian')) {
+                    petunjuk = 'Isilah titik-titik di bawah ini dengan jawaban yang singkat dan tepat!';
+                } else if (bentuk.includes('Uraian')) {
+                    petunjuk = 'Jawablah pertanyaan-pertanyaan di bawah ini dengan uraian yang jelas dan lengkap!';
                 }
 
-                let itemsHtml = '';
-                items.forEach(s => {
-                    const stimulusHtml = (s.stimulus && s.stimulus.trim() !== '') 
-                        ? `<div style="background-color: #f9fafb; border-left: 3px solid #4b5563; padding: 8px 12px; margin-bottom: 6px; font-style: italic;">${s.stimulus.replace(/\n/g, '<br>')}</div>` 
-                        : '';
-                    
+                soalSectionHtml += `
+                    <div style="margin-top: 16px; margin-bottom: 8px;">
+                        <div style="font-weight: bold; font-size: 11.5pt;">${romawi[groupIdx] || (groupIdx + 1)}. ${bentuk.toUpperCase()}</div>
+                        <div style="font-style: italic; font-size: 10.5pt; margin-bottom: 8px;">Petunjuk: ${petunjuk}</div>
+                    </div>
+                `;
+
+                list.forEach(q => {
                     let optionsHtml = '';
-                    if (s.pilihanJawaban && s.pilihanJawaban.length > 0) {
-                        optionsHtml = `<div style="margin-top: 4px; padding-left: 8px;">` + 
-                            s.pilihanJawaban.map(opt => `<div style="margin-bottom: 2px;">${opt}</div>`).join('') + 
-                            `</div>`;
+                    if (q.pilihan && q.pilihan.length > 0) {
+                        optionsHtml = `<div style="margin-left: 22px; margin-top: 4px;">`;
+                        q.pilihan.forEach(opt => {
+                            optionsHtml += `<div style="margin-bottom: 2px;">${opt}</div>`;
+                        });
+                        optionsHtml += `</div>`;
                     }
 
-                    itemsHtml += `
+                    let stimulusHtml = '';
+                    if (q.stimulus && q.stimulus.trim() !== '') {
+                        stimulusHtml = `
+                            <div style="margin-left: 22px; margin-bottom: 6px; padding: 8px 10px; border: 1px solid #888; background-color: #fafafa; font-size: 10.5pt; text-align: justify;">
+                                ${q.stimulus.replace(/\n/g, '<br>')}
+                            </div>
+                        `;
+                    }
+
+                    soalSectionHtml += `
                         <div style="margin-bottom: 14px; page-break-inside: avoid;">
-                            <table style="border: none; margin: 0; width: 100%;">
-                                <tr style="border: none;">
-                                    <td style="border: none; width: 28px; vertical-align: top; padding: 0; font-weight: bold;">${s.nomor}.</td>
-                                    <td style="border: none; vertical-align: top; padding: 0;">
-                                        ${stimulusHtml}
-                                        <div>${s.pertanyaan.replace(/\n/g, '<br>')}</div>
-                                        ${optionsHtml}
-                                    </td>
-                                </tr>
-                            </table>
+                            <div style="display: flex; align-items: flex-start;">
+                                <span style="min-width: 22px; font-weight: bold;">${q.nomorSoal}.</span>
+                                <div style="flex: 1;">
+                                    ${stimulusHtml ? stimulusHtml.replace('margin-left: 22px;', '') : ''}
+                                    <div style="text-align: justify;">${q.pertanyaan.replace(/\n/g, '<br>')}</div>
+                                    ${optionsHtml ? optionsHtml.replace('margin-left: 22px;', '') : ''}
+                                </div>
+                            </div>
                         </div>
                     `;
                 });
 
-                soalSectionsHtml += `
-                    <div style="margin-bottom: 18px;">
-                        <h4 style="margin: 0 0 4px 0; font-size: 11.5pt; font-weight: bold;">${romawi[sectionIdx] || (sectionIdx+1)}. ${bentuk.toUpperCase()}</h4>
-                        <p style="margin: 0 0 10px 0; font-size: 10.5pt; font-style: italic;">Petunjuk: ${petunjuk}</p>
-                        ${itemsHtml}
-                    </div>
-                `;
-                sectionIdx++;
+                groupIdx++;
             }
 
-            // Kunci Jawaban & Pedoman Penskoran Table
+            // Tabel Kunci Jawaban & Pedoman Penskoran
+            let totalSkor = 0;
             let kunciRowsHtml = '';
-            soalItems.forEach(s => {
+            items.forEach(q => {
+                totalSkor += (q.skorMaksimal || 1);
                 kunciRowsHtml += `
                     <tr>
-                        <td style="text-align: center; font-weight: bold;">${s.nomor}</td>
-                        <td>${s.bentukSoal}<br><span style="font-size: 9pt;">(${s.levelSolo} - ${s.kategoriKesulitan})</span></td>
-                        <td><strong>${s.kunciJawaban.replace(/\n/g, '<br>')}</strong></td>
-                        <td>${s.pembahasanDanSkor.replace(/\n/g, '<br>')}</td>
+                        <td style="text-align: center;">${q.nomorSoal}</td>
+                        <td style="text-align: center;">${q.bentukSoal}</td>
+                        <td style="text-align: center;">${q.levelSolo}<br><small>(${q.levelKesulitan})</small></td>
+                        <td><b>${q.kunciJawaban}</b></td>
+                        <td style="text-align: justify;">${q.pembahasan}</td>
+                        <td style="text-align: center;">${q.skorMaksimal}</td>
                     </tr>
                 `;
             });
 
-            const html = `
+            outputEl.innerHTML = `
                 <div id="printableSoal">
-                    <!-- Kop Naskah Soal -->
+                    <!-- KOP NASKAH SOAL -->
                     <div style="text-align: center; border-bottom: 3px double #000; padding-bottom: 10px; margin-bottom: 14px;">
-                        <h2 style="margin: 0; font-size: 14pt; font-weight: bold; text-transform: uppercase;">NASKAH SOAL ASESMEN SUMATIF / FORMATIF</h2>
-                        <h3 style="margin: 3px 0 0 0; font-size: 12pt; font-weight: bold; text-transform: uppercase;">${config.satuanPendidikan}</h3>
+                        <h2 style="font-size: 14pt; font-weight: bold; margin: 0; text-transform: uppercase;">${config.satuanPendidikan}</h2>
+                        <h3 style="font-size: 12pt; font-weight: bold; margin: 4px 0 0 0; text-transform: uppercase;">NASKAH SOAL ASESMEN SUMATIF</h3>
                     </div>
 
-                    <!-- Identitas Ujian -->
-                    <table style="border: 1px solid #000; margin-bottom: 16px;">
+                    <table style="border: 1px solid #000; margin-bottom: 16px; width: 100%;">
                         <tr>
-                            <td style="width: 20%; border: none; padding: 4px 8px;"><strong>Mata Pelajaran</strong></td>
-                            <td style="width: 30%; border: none; padding: 4px 8px;">: ${config.mataPelajaran}</td>
-                            <td style="width: 20%; border: none; padding: 4px 8px;"><strong>Nama Siswa</strong></td>
-                            <td style="width: 30%; border: none; padding: 4px 8px;">: ........................................</td>
+                            <td style="border: none; padding: 4px 8px; width: 20%;"><b>Mata Pelajaran</b></td>
+                            <td style="border: none; padding: 4px 2px; width: 2%;">:</td>
+                            <td style="border: none; padding: 4px 8px; width: 38%;">${config.mataPelajaran}</td>
+                            <td style="border: none; padding: 4px 8px; width: 18%;"><b>Nama Siswa</b></td>
+                            <td style="border: none; padding: 4px 2px; width: 2%;">:</td>
+                            <td style="border: none; padding: 4px 8px; width: 20%;">..................................</td>
                         </tr>
                         <tr>
-                            <td style="border: none; padding: 4px 8px;"><strong>Jenjang / Fase</strong></td>
-                            <td style="border: none; padding: 4px 8px;">: ${config.jenjang} / ${config.faseKelas}</td>
-                            <td style="border: none; padding: 4px 8px;"><strong>No. Absen</strong></td>
-                            <td style="border: none; padding: 4px 8px;">: ........................................</td>
+                            <td style="border: none; padding: 4px 8px;"><b>Jenjang / Fase</b></td>
+                            <td style="border: none; padding: 4px 2px;">:</td>
+                            <td style="border: none; padding: 4px 8px;">${config.jenjang} / ${config.faseKelas}</td>
+                            <td style="border: none; padding: 4px 8px;"><b>No. Absen</b></td>
+                            <td style="border: none; padding: 4px 2px;">:</td>
+                            <td style="border: none; padding: 4px 8px;">..................................</td>
                         </tr>
                         <tr>
-                            <td style="border: none; padding: 4px 8px;"><strong>Topik / Materi</strong></td>
-                            <td colspan="3" style="border: none; padding: 4px 8px;">: ${config.topikMateri}</td>
+                            <td style="border: none; padding: 4px 8px;"><b>Materi Pokok</b></td>
+                            <td style="border: none; padding: 4px 2px;">:</td>
+                            <td colspan="4" style="border: none; padding: 4px 8px;">${config.topikMateri}</td>
                         </tr>
                     </table>
 
-                    <!-- Butir-Butir Soal -->
-                    ${soalSectionsHtml}
+                    <!-- BUTIR SOAL -->
+                    <div>
+                        ${soalSectionHtml}
+                    </div>
 
-                    <!-- Page Break untuk Kunci Jawaban -->
-                    <div style="page-break-before: always; margin-top: 30px; padding-top: 16px; border-top: 2px dashed #666;">
-                        <div style="text-align: center; margin-bottom: 14px;">
-                            <h3 style="margin: 0; font-size: 13pt; font-weight: bold; text-transform: uppercase;">KUNCI JAWABAN, PEMBAHASAN & PEDOMAN PENSKORAN</h3>
-                            <p style="margin: 2px 0 0 0; font-size: 10.5pt;">${config.mataPelajaran} - ${config.faseKelas} (${config.satuanPendidikan})</p>
+                    <!-- PEMISAH HALAMAN UNTUK KUNCI JAWABAN -->
+                    <div style="page-break-before: always; margin-top: 32px; padding-top: 16px; border-top: 2px dashed #666;">
+                        <div style="text-align: center; margin-bottom: 12px;">
+                            <h3 style="font-size: 13pt; font-weight: bold; margin: 0; text-transform: uppercase;">KUNCI JAWABAN & PEDOMAN PENSKORAN</h3>
+                            <p style="font-size: 10.5pt; margin: 4px 0 0 0;">${config.mataPelajaran} - ${config.faseKelas} (${config.topikMateri})</p>
                         </div>
 
                         <table>
                             <thead>
                                 <tr>
-                                    <th style="width: 7%;">No</th>
-                                    <th style="width: 20%;">Bentuk & Level SOLO</th>
-                                    <th style="width: 28%;">Kunci Jawaban</th>
-                                    <th style="width: 45%;">Pembahasan & Pedoman Penskoran</th>
+                                    <th style="width: 6%;">No</th>
+                                    <th style="width: 14%;">Bentuk</th>
+                                    <th style="width: 15%;">Level SOLO</th>
+                                    <th style="width: 22%;">Kunci Jawaban</th>
+                                    <th style="width: 35%;">Pembahasan / Rubrik</th>
+                                    <th style="width: 8%;">Skor</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${kunciRowsHtml}
+                                <tr>
+                                    <td colspan="5" style="text-align: right; font-weight: bold;">TOTAL SKOR MAKSIMAL</td>
+                                    <td style="text-align: center; font-weight: bold;">${totalSkor}</td>
+                                </tr>
                             </tbody>
                         </table>
+
+                        <div style="margin-top: 10px; font-size: 10.5pt;">
+                            <b>Rumus Nilai Akhir:</b> Nilai = (Jumlah Skor Perolehan &divide; ${totalSkor}) &times; 100
+                        </div>
                     </div>
                 </div>
             `;
 
             emptyEl.classList.add('hidden');
-            outputEl.innerHTML = html;
             outputEl.classList.remove('hidden');
-            generatedSoalHtml = html;
         }
 
         // Export to Microsoft Word (.doc)
@@ -1028,65 +1104,45 @@ ${referensiKisiPrompt}`;
             const contentEl = document.getElementById(targetId);
 
             if (!contentEl) {
-                showToast(`Silakan generate ${activeTab === 'kisi' ? 'Kisi-Kisi Soal' : 'Naskah Soal'} terlebih dahulu sebelum mengunduh.`, 'error');
+                showToast('Belum ada dokumen yang dapat diunduh. Silakan generate terlebih dahulu.', 'error');
                 return;
             }
 
-            const mapel = document.getElementById('mataPelajaran').value.replace(/[^a-zA-Z0-9]/g, '_');
-            const docTitle = activeTab === 'kisi' ? `Kisi_Kisi_SOLO_${mapel}` : `Naskah_Soal_SOLO_${mapel}`;
+            const mapel = document.getElementById('mataPelajaran').value || 'Dokumen';
+            const fileName = activeTab === 'kisi'
+                ? `Kisi-Kisi_SOLO_${mapel.replace(/\s+/g, '_')}.doc`
+                : `Naskah_Soal_SOLO_${mapel.replace(/\s+/g, '_')}.doc`;
 
-            const preHtml = `
+            const header = `
                 <html xmlns:o='urn:schemas-microsoft-com:office:office' 
                       xmlns:w='urn:schemas-microsoft-com:office:word' 
                       xmlns='http://www.w3.org/TR/REC-html40'>
                 <head>
                     <meta charset='utf-8'>
-                    <title>${docTitle}</title>
+                    <title>Export Word</title>
                     <style>
-                        @page {
-                            size: A4 portrait;
-                            margin: 2cm;
-                        }
-                        body {
-                            font-family: 'Times New Roman', Times, serif;
-                            font-size: 11pt;
-                            line-height: 1.4;
-                        }
-                        table {
-                            width: 100%;
-                            border-collapse: collapse;
-                        }
-                        th, td {
-                            border: 1px solid #000000;
-                            padding: 6px;
-                            vertical-align: top;
-                        }
-                        th {
-                            background-color: #f2f2f2;
-                            font-weight: bold;
-                            text-align: center;
-                        }
+                        body { font-family: 'Times New Roman', Times, serif; font-size: 11pt; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { border: 1px solid #000; padding: 6px; vertical-align: top; }
+                        th { background-color: #f2f2f2; font-weight: bold; text-align: center; }
                     </style>
                 </head>
                 <body>
             `;
-            const postHtml = "</body></html>";
-            const fullHtml = preHtml + contentEl.innerHTML + postHtml;
+            const footer = `</body></html>`;
+            const sourceHTML = header + contentEl.innerHTML + footer;
 
-            const blob = new Blob(['\ufeff', fullHtml], {
-                type: 'application/msword'
-            });
-
+            const blob = new Blob(['\ufeff', sourceHTML], { type: 'application/msword' });
             const url = URL.createObjectURL(blob);
-            const downloadLink = document.createElement("a");
-            document.body.appendChild(downloadLink);
-            downloadLink.href = url;
-            downloadLink.download = `${docTitle}.doc`;
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             URL.revokeObjectURL(url);
 
-            showToast('Dokumen Word (.doc) berhasil diunduh!', 'success');
+            showToast(`Berhasil mengunduh ${fileName}`, 'success');
         }
 
         // Export to PDF (.pdf)
@@ -1095,36 +1151,36 @@ ${referensiKisiPrompt}`;
             const contentEl = document.getElementById(targetId);
 
             if (!contentEl) {
-                showToast(`Silakan generate ${activeTab === 'kisi' ? 'Kisi-Kisi Soal' : 'Naskah Soal'} terlebih dahulu sebelum mengunduh.`, 'error');
+                showToast('Belum ada dokumen yang dapat diunduh. Silakan generate terlebih dahulu.', 'error');
                 return;
             }
 
-            const mapel = document.getElementById('mataPelajaran').value.replace(/[^a-zA-Z0-9]/g, '_');
-            const filename = activeTab === 'kisi' ? `Kisi_Kisi_SOLO_${mapel}.pdf` : `Naskah_Soal_SOLO_${mapel}.pdf`;
-
-            showToast('Memproses file PDF, mohon tunggu sebentar...', 'info');
+            const mapel = document.getElementById('mataPelajaran').value || 'Dokumen';
+            const fileName = activeTab === 'kisi'
+                ? `Kisi-Kisi_SOLO_${mapel.replace(/\s+/g, '_')}.pdf`
+                : `Naskah_Soal_SOLO_${mapel.replace(/\s+/g, '_')}.pdf`;
 
             const opt = {
-                margin:       [12, 12, 12, 12],
-                filename:     filename,
-                image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2, useCORS: true, letterRendering: true },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: activeTab === 'kisi' ? 'landscape' : 'portrait' },
-                pagebreak:    { mode: ['css', 'legacy'] }
+                margin: [12, 12, 12, 12],
+                filename: fileName,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2, useCORS: true },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: activeTab === 'kisi' ? 'landscape' : 'portrait' }
             };
 
+            showToast('Menyiapkan file PDF...', 'info');
             html2pdf().set(opt).from(contentEl).save().then(() => {
-                showToast('Dokumen PDF berhasil diunduh!', 'success');
+                showToast(`Berhasil mengunduh ${fileName}`, 'success');
             }).catch(() => {
-                showToast('Terjadi kesalahan saat mengekspor PDF.', 'error');
+                showToast('Terjadi kendala saat membuat PDF.', 'error');
             });
         }
 
-        // Initialize on Window Load
-        window.onload = function() {
+        // Initialize App on Load
+        window.addEventListener('DOMContentLoaded', () => {
             updateFaseOptions();
             renderSoloMatrix();
-        };
+        });
     </script>
 </body>
 </html>
